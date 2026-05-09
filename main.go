@@ -1,0 +1,79 @@
+package main
+
+import (
+	"context"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"HSE/internal/config"
+	"HSE/internal/repository/postgres"
+	"HSE/internal/transport/httpapi"
+	"HSE/internal/usecase"
+
+	"github.com/joho/godotenv"
+)
+
+func main() {
+	_ = godotenv.Load()
+
+	cfg := config.FromEnv()
+
+	logger := log.New(os.Stdout, "", log.LstdFlags)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	db, err := postgres.Open(ctx, cfg.DB)
+	if err != nil {
+		logger.Fatalf("db open: %v", err)
+	}
+	defer db.Close()
+
+	if err := postgres.InitSchema(ctx, db); err != nil {
+		logger.Fatalf("db init schema: %v", err)
+	}
+
+	repos := postgres.NewRepositories(db)
+
+	uc := usecase.New(
+		repos.Test,
+		repos.DBTest,
+		repos.Users,
+		repos.Orders,
+		repos.Docs,
+		cfg.Auth.JWTSecret,
+		cfg.Auth.JWTIssuer,
+		cfg.Auth.JWTTTL,
+	)
+
+	handler := httpapi.NewHandler(uc, cfg.Auth.JWTSecret, cfg.Auth.JWTIssuer)
+
+	srv := &http.Server{
+		Addr:              cfg.HTTP.Addr,
+		Handler:           handler.Routes(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		logger.Printf("listening on %s", cfg.HTTP.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf("listen: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	logger.Printf("shutdown signal received")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Printf("shutdown error: %v", err)
+	} else {
+		logger.Printf("shutdown complete")
+	}
+}
