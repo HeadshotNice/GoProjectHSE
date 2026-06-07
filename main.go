@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"HSE/internal/config"
+	"HSE/internal/queue/rabbitmq"
 	"HSE/internal/repository/postgres"
 	"HSE/internal/transport/httpapi"
 	"HSE/internal/usecase"
+	"HSE/internal/worker"
 
 	"github.com/joho/godotenv"
 )
@@ -39,16 +41,35 @@ func main() {
 
 	repos := postgres.NewRepositories(db)
 
+	var events *rabbitmq.Client
+	if cfg.RabbitMQ.Enabled {
+		events, err = rabbitmq.Open(cfg.RabbitMQ)
+		if err != nil {
+			logger.Fatalf("rabbitmq open: %v", err)
+		}
+		defer events.Close()
+	}
+
 	uc := usecase.New(
 		repos.Test,
 		repos.DBTest,
 		repos.Users,
 		repos.Orders,
 		repos.Docs,
+		events,
 		cfg.Auth.JWTSecret,
 		cfg.Auth.JWTIssuer,
 		cfg.Auth.JWTTTL,
 	)
+
+	if events != nil {
+		documentWorker := worker.NewDocumentReviewWorker(events, uc, logger)
+		go func() {
+			if err := documentWorker.Run(ctx); err != nil && err != context.Canceled {
+				logger.Printf("document review worker stopped: %v", err)
+			}
+		}()
+	}
 
 	handler := httpapi.NewHandler(uc, cfg.Auth.JWTSecret, cfg.Auth.JWTIssuer)
 

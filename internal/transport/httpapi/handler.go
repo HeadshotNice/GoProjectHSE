@@ -19,7 +19,6 @@ type Handler struct {
 }
 
 func NewHandler(uc *usecase.Usecase, jwtSecret, jwtIssuer string) *Handler {
-	// We only need secret+issuer for parsing; ttl is irrelevant here.
 	return &Handler{
 		uc:  uc,
 		jwt: authjwt.New(jwtSecret, jwtIssuer, 0),
@@ -29,6 +28,7 @@ func NewHandler(uc *usecase.Usecase, jwtSecret, jwtIssuer string) *Handler {
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.Handle("GET /metrics", metricsHandler())
 	mux.HandleFunc("GET /", h.handleIndex)
 	mux.HandleFunc("GET /test", h.handleTest)
 	mux.HandleFunc("POST /dbtest", h.handleDBTest)
@@ -36,12 +36,10 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /auth/register", h.handleRegister)
 	mux.HandleFunc("POST /auth/login", h.handleLogin)
 
-	mux.Handle("POST /orders", h.authMiddleware(http.HandlerFunc(h.handleCreateOrder)))
-	mux.Handle("GET /orders", h.authMiddleware(http.HandlerFunc(h.handleListOrders)))
 	mux.Handle("POST /documents", h.authMiddleware(http.HandlerFunc(h.handleCreateDocument)))
 	mux.Handle("GET /documents", h.authMiddleware(http.HandlerFunc(h.handleListDocuments)))
 
-	return mux
+	return metricsMiddleware(mux)
 }
 
 func (h *Handler) handleIndex(w http.ResponseWriter, _ *http.Request) {
@@ -95,6 +93,9 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		code := http.StatusInternalServerError
 		if errors.Is(err, usecase.ErrBadRequest) {
 			code = http.StatusBadRequest
+		}
+		if errors.Is(err, usecase.ErrAlreadyExists) {
+			code = http.StatusConflict
 		}
 		writeError(w, code, err.Error())
 		return
@@ -177,7 +178,8 @@ func (h *Handler) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleListOrders(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromCtx(r.Context())
-	orders, err := h.uc.ListOrders(r.Context(), userID)
+	activeOnly := r.URL.Query().Get("active") == "true"
+	orders, err := h.uc.ListOrders(r.Context(), userID, activeOnly)
 	if err != nil {
 		code := http.StatusInternalServerError
 		if errors.Is(err, usecase.ErrUnauthorized) {

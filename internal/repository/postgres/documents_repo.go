@@ -15,10 +15,11 @@ func (r *DocumentsRepo) Create(ctx context.Context, userID int64, title, content
 	var id int64
 	err := r.db.QueryRowContext(
 		ctx,
-		`insert into documents(user_id, title, content) values ($1, $2, $3) returning id`,
+		`insert into documents(user_id, title, content, status) values ($1, $2, $3, $4) returning id`,
 		userID,
 		title,
 		content,
+		entity.DocumentStatusPendingReview,
 	).Scan(&id)
 	if err != nil {
 		return 0, err
@@ -29,7 +30,7 @@ func (r *DocumentsRepo) Create(ctx context.Context, userID int64, title, content
 func (r *DocumentsRepo) ListByUser(ctx context.Context, userID int64) ([]entity.Document, error) {
 	rows, err := r.db.QueryContext(
 		ctx,
-		`select id, user_id, title, content, status, created_at from documents where user_id = $1 order by id desc`,
+		`select id, user_id, title, content, status, created_at, updated_at from documents where user_id = $1 order by id desc`,
 		userID,
 	)
 	if err != nil {
@@ -47,6 +48,7 @@ func (r *DocumentsRepo) ListByUser(ctx context.Context, userID int64) ([]entity.
 			&document.Content,
 			&document.Status,
 			&document.CreatedAt,
+			&document.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -56,4 +58,14 @@ func (r *DocumentsRepo) ListByUser(ctx context.Context, userID int64) ([]entity.
 		return nil, err
 	}
 	return out, nil
+}
+
+func (r *DocumentsRepo) UpdateStatus(ctx context.Context, documentID int64, status string) error {
+	_, err := r.db.ExecContext(
+		ctx,
+		`update documents set status = $1, updated_at = now() where id = $2`,
+		status,
+		documentID,
+	)
+	return err
 }

@@ -1,130 +1,127 @@
-# HSE Labs (LR1–LR5) — Go HTTP Server
+# Document Review System
 
-Проект: простой HTTP сервер на Go с чистой архитектурой (3 слоя), PostgreSQL, JWT и middleware.
+Учебная система проверки документов на Go: регистрация, логин, отправка документов,
+просмотр статуса проверки, PostgreSQL, RabbitMQ, Prometheus и Grafana.
 
-## Быстрый старт
+## Сценарий
 
-1. Заполните переменные окружения (есть пример в [.env](./.env)).
-2. Запуск:
-   - из консоли: `go run .`
-   - из GoLand: Run конфигурация для `main` (важно: Working Directory = корень проекта, чтобы `.env` подхватился)
+1. Пользователь регистрируется.
+2. Пользователь входит в систему и получает JWT.
+3. Пользователь отправляет документ на проверку.
+4. Документ сохраняется в PostgreSQL со статусом `pending_review`.
+5. Сервис публикует событие `document-submitted` в RabbitMQ.
+6. Worker читает событие из очереди и меняет статус документа:
+   - `pending_review`
+   - `in_review`
+   - `approved`
+7. Пользователь обновляет список документов и видит актуальный статус проверки.
 
-Сервер по умолчанию слушает `:8080` (переменная `HTTP_ADDR`).
+## Архитектура
 
-## Эндпоинты
+- `internal/transport/httpapi` - HTTP API, HTML-страница, JWT middleware, Prometheus metrics.
+- `internal/usecase` - бизнес-логика регистрации, логина и проверки документов.
+- `internal/repository/postgres` - SQL и работа с PostgreSQL.
+- `internal/queue/rabbitmq` - RabbitMQ publisher/consumer для событий документов.
+- `internal/worker` - worker проверки документов.
+- `internal/config` - настройки из `.env`.
 
-- `GET /test` -> `Hello!`
-- `POST /dbtest` -> пишет строку тела запроса в БД, ответ `{ "ok": true }`
-- `POST /auth/register` -> регистрация пользователя
-- `POST /auth/login` -> логин, возвращает JWT `{ "token": "..." }`
-- `POST /orders` -> создать заказ (нужен `Authorization: Bearer <JWT>`)
-- `GET /orders` -> список заказов пользователя (нужен `Authorization: Bearer <JWT>`)
+## Стек
 
-## Чистая архитектура (3 слоя)
+- Go HTTP server
+- PostgreSQL
+- JWT + bcrypt
+- RabbitMQ
+- Prometheus
+- Grafana
+- Docker Compose
 
-**Transport (HTTP)**
-- Роутинг/парсинг запросов/формирование ответов, middleware.
+## Запуск
 
-**Usecase (Business logic)**
-- Валидация данных, сценарии: тестовый hello, запись в БД, регистрация/логин, заказы, JWT issuance.
+1. Заполните `.env` по примеру `.env.example`.
 
-**Repository (DB isolation)**
-- Только SQL и работа с БД (PostgreSQL).
+2. Поднимите инфраструктуру:
 
-Связь слоев сделана через интерфейсы, которые объявлены на уровне usecase:
-см. [internal/usecase/usecase.go](./internal/usecase/usecase.go) (интерфейсы `TestRepo`, `DBTestRepo`, `UsersRepo`, `OrdersRepo`).
+```powershell
+docker compose up -d
+```
 
-## ЛР1 — Пустой HTTP сервер + /test + graceful shutdown + 3 слоя
+3. Запустите Go-сервис:
 
-Что требуется:
-- HTTP сервер на Go
-- `GET /test` -> `"Hello!"`
-- обработка запроса задействует все 3 слоя (transport → usecase → repository)
-- graceful shutdown по сигналу завершения
+```powershell
+go run .
+```
 
-Где реализовано:
-- Точка входа и graceful shutdown: [main.go](./main.go)
-  - `signal.NotifyContext(...)` ловит `SIGTERM`/`Ctrl+C`
-  - `srv.Shutdown(ctx)` завершает сервер корректно
-- HTTP слой и `GET /test`: [internal/transport/httpapi/handler.go](./internal/transport/httpapi/handler.go)
-  - `handleTest` вызывает `uc.TestHello(...)`
-- Usecase слой для теста: [internal/usecase/usecase.go](./internal/usecase/usecase.go)
-  - `TestHello` вызывает `test.Hello(...)`
-- Repository слой для теста: [internal/repository/postgres/test_repo.go](./internal/repository/postgres/test_repo.go)
-  - `Hello` делает `select 1` и возвращает `"Hello!"` (чтобы запрос точно прошел через repository)
+## Адреса
 
-## ЛР2 — Подключение PostgreSQL + инициализация таблиц + /dbtest
+- Сайт/API: `http://localhost:8080`
+- Метрики Go-сервиса: `http://localhost:8080/metrics`
+- RabbitMQ Management: `http://localhost:15672` (`admin` / `admin`)
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (`admin` / `admin`)
 
-Что требуется:
-- подключение к PostgreSQL
-- инициализация таблиц
-- `POST /dbtest`: записывает строку из тела запроса в БД
-- работа с БД на слое repository
+## API
 
-Где реализовано:
-- Конфиг БД из env: [internal/config/config.go](./internal/config/config.go)
-  - переменные `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE`
-- Открытие подключения: [internal/repository/postgres/db.go](./internal/repository/postgres/db.go)
-  - драйвер `pgx` через `database/sql`
-- Инициализация таблиц: [internal/repository/postgres/schema.go](./internal/repository/postgres/schema.go)
-  - создаются таблицы `dbtest_logs`, `users`, `orders`
-- Repository для /dbtest: [internal/repository/postgres/dbtest_repo.go](./internal/repository/postgres/dbtest_repo.go)
-  - `InsertLine(...)` делает `insert into dbtest_logs(...)`
-- Usecase для /dbtest: [internal/usecase/usecase.go](./internal/usecase/usecase.go)
-  - `DBTestInsert(...)` валидирует и вызывает repository
-- HTTP хэндлер для /dbtest: [internal/transport/httpapi/handler.go](./internal/transport/httpapi/handler.go)
-  - `handleDBTest` читает тело и вызывает usecase
+Публичные:
 
-## ЛР3 — Пользователь: регистрация + логин + JWT
+- `GET /` - HTML-интерфейс системы.
+- `GET /test` - проверка сервера, возвращает `Hello!`.
+- `POST /dbtest` - тестовая запись строки в PostgreSQL.
+- `POST /auth/register` - регистрация.
+- `POST /auth/login` - логин и получение JWT.
 
-Что требуется:
-- хэндлер регистрации (создает пользователя в БД)
-- хэндлер авторизации (логин) и выдачи JWT
+Защищенные, нужен `Authorization: Bearer <JWT>`:
 
-Где реализовано:
-- Таблица пользователей создается в: [internal/repository/postgres/schema.go](./internal/repository/postgres/schema.go)
-  - `users(email unique, password_hash, created_at)`
-- Repository пользователей: [internal/repository/postgres/users_repo.go](./internal/repository/postgres/users_repo.go)
-  - `Create(...)`, `FindByEmail(...)`
-- Usecase регистрации/логина: [internal/usecase/usecase.go](./internal/usecase/usecase.go)
-  - `Register(...)` делает bcrypt-хеш и создает пользователя
-  - `Login(...)` проверяет пароль и вызывает JWT issuance
-- JWT менеджер: [internal/usecase/authjwt/jwt.go](./internal/usecase/authjwt/jwt.go)
-  - `Issue(userID)` создает токен (HS256)
-  - `ParseUserID(token)` парсит токен и возвращает `userID`
-- HTTP хэндлеры:
-  - `POST /auth/register`: [internal/transport/httpapi/handler.go](./internal/transport/httpapi/handler.go)
-  - `POST /auth/login`: [internal/transport/httpapi/handler.go](./internal/transport/httpapi/handler.go)
+- `POST /documents` - отправить документ на проверку.
+- `GET /documents` - получить свои документы и статусы проверки.
 
-Переменные JWT:
-- `JWT_SECRET`, `JWT_ISSUER`, `JWT_TTL` (см. [.env](./.env) и [internal/config/config.go](./internal/config/config.go))
+## RabbitMQ
 
-## ЛР4 — Заказы: создание + получение статусов всех заказов пользователя
+Используются:
 
-Что требуется:
-- создать новый заказ
-- вернуть статусы всех заказов пользователя
+- Exchange: `main_exchange`
+- Queue: `document_submitted`
+- Queue: `document_status`
+- Routing key: `document-submitted`
+- Routing key: `document-status-change`
 
-Где реализовано:
-- Таблица заказов создается в: [internal/repository/postgres/schema.go](./internal/repository/postgres/schema.go)
-  - `orders(user_id -> users, status default 'created', created_at)`
-- Repository заказов: [internal/repository/postgres/orders_repo.go](./internal/repository/postgres/orders_repo.go)
-  - `Create(userID)`, `ListByUser(userID)`
-- Usecase:
-  - `CreateOrder(...)`, `ListOrders(...)`: [internal/usecase/usecase.go](./internal/usecase/usecase.go)
-- HTTP:
-  - `POST /orders`, `GET /orders`: [internal/transport/httpapi/handler.go](./internal/transport/httpapi/handler.go)
+В RabbitMQ можно смотреть, как событие о новом документе попадает в очередь.
+Если worker быстро обработал сообщение, очередь может быть пустой, но в RabbitMQ будут видны
+подключения, каналы и активность по очередям.
 
-## ЛР5 — Middleware: JWT -> userID в хэндлерах заказов
+## Grafana и Prometheus
 
-Что требуется:
-- middleware, который принимает JWT и передает в хэндлеры заказов ID пользователя
+Prometheus собирает метрики с `/metrics`.
 
-Где реализовано:
-- Middleware: [internal/transport/httpapi/handler.go](./internal/transport/httpapi/handler.go)
-  - `authMiddleware(...)`:
-    - читает `Authorization: Bearer <token>`
-    - парсит токен (`ParseUserID`)
-    - кладет `userID` в `context.Context`
-  - `userIDFromCtx(...)` достает `userID` для `handleCreateOrder` / `handleListOrders`
+Полезные PromQL-запросы:
 
+```promql
+hse_http_requests_total
+```
+
+```promql
+hse_http_requests_total{path="/documents"}
+```
+
+```promql
+rate(hse_http_requests_total[1m])
+```
+
+```promql
+rate(hse_http_request_duration_seconds_sum[1m])
+/
+rate(hse_http_request_duration_seconds_count[1m])
+```
+
+## Тесты
+
+```powershell
+go test ./...
+```
+
+Проверяется:
+
+- повторная регистрация email запрещена;
+- email нормализуется;
+- неверный пароль не проходит;
+- успешный логин возвращает JWT;
+- защищенные действия требуют пользователя.

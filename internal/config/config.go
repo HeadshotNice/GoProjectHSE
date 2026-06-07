@@ -7,9 +7,10 @@ import (
 )
 
 type Config struct {
-	HTTP HTTPConfig
-	DB   DBConfig
-	Auth AuthConfig
+	HTTP     HTTPConfig
+	DB       DBConfig
+	Auth     AuthConfig
+	RabbitMQ RabbitMQConfig
 }
 
 type HTTPConfig struct {
@@ -31,6 +32,16 @@ type AuthConfig struct {
 	JWTTTL    time.Duration
 }
 
+type RabbitMQConfig struct {
+	Enabled                bool
+	URL                    string
+	Exchange               string
+	DocumentSubmittedKey   string
+	DocumentStatusKey      string
+	DocumentSubmittedQueue string
+	DocumentStatusQueue    string
+}
+
 func FromEnv() Config {
 	return Config{
 		HTTP: HTTPConfig{
@@ -48,6 +59,15 @@ func FromEnv() Config {
 			JWTSecret: env("JWT_SECRET", "dev-secret-change-me"),
 			JWTIssuer: env("JWT_ISSUER", "hse-server"),
 			JWTTTL:    envDuration("JWT_TTL", 24*time.Hour),
+		},
+		RabbitMQ: RabbitMQConfig{
+			Enabled:                envBool("RABBITMQ_ENABLED", true),
+			URL:                    env("RABBITMQ_URL", "amqp://admin:admin@localhost:5672/"),
+			Exchange:               env("RABBITMQ_EXCHANGE", "main_exchange"),
+			DocumentSubmittedKey:   env("RABBITMQ_DOCUMENT_SUBMITTED_KEY", "document-submitted"),
+			DocumentStatusKey:      env("RABBITMQ_DOCUMENT_STATUS_KEY", "document-status-change"),
+			DocumentSubmittedQueue: env("RABBITMQ_DOCUMENT_SUBMITTED_QUEUE", "document_submitted"),
+			DocumentStatusQueue:    env("RABBITMQ_DOCUMENT_STATUS_QUEUE", "document_status"),
 		},
 	}
 }
@@ -68,6 +88,15 @@ func envInt(key string, def int) int {
 	return def
 }
 
+func envBool(key string, def bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return def
+}
+
 func envDuration(key string, def time.Duration) time.Duration {
 	if v := os.Getenv(key); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -76,4 +105,3 @@ func envDuration(key string, def time.Duration) time.Duration {
 	}
 	return def
 }
-
