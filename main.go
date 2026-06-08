@@ -54,7 +54,6 @@ func main() {
 		repos.Test,
 		repos.DBTest,
 		repos.Users,
-		repos.Orders,
 		repos.Docs,
 		events,
 		cfg.Auth.JWTSecret,

@@ -56,20 +56,6 @@ func (r *fakeUsersRepo) FindByEmail(ctx context.Context, email string) (*entity.
 	return user, nil
 }
 
-type fakeOrdersRepo struct{}
-
-func (fakeOrdersRepo) Create(ctx context.Context, userID int64) (int64, error) {
-	return 10, nil
-}
-
-func (fakeOrdersRepo) ListByUser(ctx context.Context, userID int64, activeOnly bool) ([]entity.Order, error) {
-	return []entity.Order{{ID: 10, UserID: userID, Status: "created"}}, nil
-}
-
-func (fakeOrdersRepo) UpdateStatus(ctx context.Context, orderID int64, status string) error {
-	return nil
-}
-
 type fakeDocumentsRepo struct{}
 
 func (fakeDocumentsRepo) Create(ctx context.Context, userID int64, title, content string) (int64, error) {
@@ -89,7 +75,6 @@ func newTestUsecase(users *fakeUsersRepo) *Usecase {
 		fakeTestRepo{},
 		fakeDBTestRepo{},
 		users,
-		fakeOrdersRepo{},
 		fakeDocumentsRepo{},
 		nil,
 		"test-secret",
@@ -142,10 +127,6 @@ func TestRegisterRejectsWeakPassword(t *testing.T) {
 
 func TestProtectedActionsRequireUserID(t *testing.T) {
 	uc := newTestUsecase(newFakeUsersRepo())
-
-	if _, err := uc.CreateOrder(context.Background(), 0); !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("expected ErrUnauthorized for order, got %v", err)
-	}
 
 	if _, err := uc.CreateDocument(context.Background(), 0, "title", "content"); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("expected ErrUnauthorized for document, got %v", err)

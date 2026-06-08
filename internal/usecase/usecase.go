@@ -32,12 +32,6 @@ type UsersRepo interface {
 	FindByEmail(ctx context.Context, email string) (*entity.User, error)
 }
 
-type OrdersRepo interface {
-	Create(ctx context.Context, userID int64) (int64, error)
-	ListByUser(ctx context.Context, userID int64, activeOnly bool) ([]entity.Order, error)
-	UpdateStatus(ctx context.Context, orderID int64, status string) error
-}
-
 type DocumentsRepo interface {
 	Create(ctx context.Context, userID int64, title, content string) (int64, error)
 	ListByUser(ctx context.Context, userID int64) ([]entity.Document, error)
@@ -52,7 +46,6 @@ type Usecase struct {
 	test   TestRepo
 	dbtest DBTestRepo
 	users  UsersRepo
-	orders OrdersRepo
 	docs   DocumentsRepo
 	events DocumentEvents
 
@@ -63,7 +56,6 @@ func New(
 	test TestRepo,
 	dbtest DBTestRepo,
 	users UsersRepo,
-	orders OrdersRepo,
 	docs DocumentsRepo,
 	events DocumentEvents,
 	jwtSecret string,
@@ -74,7 +66,6 @@ func New(
 		test:   test,
 		dbtest: dbtest,
 		users:  users,
-		orders: orders,
 		docs:   docs,
 		events: events,
 		jwt:    authjwt.New(jwtSecret, jwtIssuer, jwtTTL),
@@ -134,36 +125,6 @@ func (u *Usecase) Login(ctx context.Context, email, password string) (string, er
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
-}
-
-func (u *Usecase) CreateOrder(ctx context.Context, userID int64) (int64, error) {
-	if userID <= 0 {
-		return 0, ErrUnauthorized
-	}
-	orderID, err := u.orders.Create(ctx, userID)
-	if err != nil {
-		return 0, err
-	}
-	return orderID, nil
-}
-
-func (u *Usecase) ListOrders(ctx context.Context, userID int64, activeOnly bool) ([]entity.Order, error) {
-	if userID <= 0 {
-		return nil, ErrUnauthorized
-	}
-	return u.orders.ListByUser(ctx, userID, activeOnly)
-}
-
-func (u *Usecase) UpdateOrderStatus(ctx context.Context, orderID int64, status string) error {
-	if orderID <= 0 || status == "" {
-		return ErrBadRequest
-	}
-	switch status {
-	case entity.OrderStatusCreated, entity.OrderStatusPacking, entity.OrderStatusArriving, entity.OrderStatusCompleted, entity.OrderStatusCanceled:
-		return u.orders.UpdateStatus(ctx, orderID, status)
-	default:
-		return ErrBadRequest
-	}
 }
 
 func (u *Usecase) CreateDocument(ctx context.Context, userID int64, title, content string) (int64, error) {

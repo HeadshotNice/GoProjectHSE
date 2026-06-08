@@ -162,35 +162,6 @@ func userIDFromCtx(ctx context.Context) int64 {
 	return id
 }
 
-func (h *Handler) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFromCtx(r.Context())
-	orderID, err := h.uc.CreateOrder(r.Context(), userID)
-	if err != nil {
-		code := http.StatusInternalServerError
-		if errors.Is(err, usecase.ErrUnauthorized) {
-			code = http.StatusUnauthorized
-		}
-		writeError(w, code, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"order_id": orderID})
-}
-
-func (h *Handler) handleListOrders(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFromCtx(r.Context())
-	activeOnly := r.URL.Query().Get("active") == "true"
-	orders, err := h.uc.ListOrders(r.Context(), userID, activeOnly)
-	if err != nil {
-		code := http.StatusInternalServerError
-		if errors.Is(err, usecase.ErrUnauthorized) {
-			code = http.StatusUnauthorized
-		}
-		writeError(w, code, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"orders": orders})
-}
-
 type createDocumentReq struct {
 	Title   string `json:"title"`
 	Content string `json:"content"`
